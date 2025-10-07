@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Interactive Sim Look – Pixel Hit Test (Pulse Glow)</title>
+<style>
+  body { font-family: 'Poppins', sans-serif; background:#f8f6f2; display:flex; flex-direction:column; align-items:center; gap:16px; padding:40px; }
+  .sim-container { position:relative; width:400px; max-width:90%; }
+  .sim-base { width:100%; display:block; border-radius:12px; }
+
+  .cc-img {
+    position:absolute; inset:0; width:100%;
+    pointer-events:none;
+    transition:filter .25s ease, transform .15s ease;
+  }
+
+  /* Add subtle breathing pulse animation */
+  .cc-img.glow {
+    filter: drop-shadow(0 0 12px #3b82f6) brightness(1.08);
+    transform: scale(1.005);
+    animation: pulseGlow 1.6s ease-in-out infinite;
+  }
+
+  @keyframes pulseGlow {
+    0%   { filter: drop-shadow(0 0 6px #3b82f6) brightness(1.05); }
+    50%  { filter: drop-shadow(0 0 14px #3b82f6) brightness(1.12); }
+    100% { filter: drop-shadow(0 0 6px #3b82f6) brightness(1.05); }
+  }
+
+  .hit-surface { position:absolute; inset:0; cursor:pointer; }
+
+  .tooltip {
+    position:fixed;
+    background:rgba(59,130,246,.95);
+    color:#fff;
+    padding:6px 10px;
+    border-radius:6px;
+    font-size:13px;
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .12s;
+    z-index:10;
+  }
+</style>
+</head>
+<body>
+  <h1>Interactive Sim Look 🌼</h1>
+
+  <div class="sim-container" id="viewer">
+    <!-- Base image -->
+    <img class="sim-base" id="base"
+         src="https://i.ibb.co/LDTRYrpq/base.png" alt="Base">
+
+    <!-- Overlay PNG layers (visual only) -->
+    <img class="cc-img" id="hairVis"  src="https://i.ibb.co/C5myWkX2/hair.png"  alt="Hair">
+    <img class="cc-img" id="necklaceVis"  src="https://i.ibb.co/217Q65p3/necklace.png"  alt="Necklace">
+    <img class="cc-img" id="dressVis" src="https://i.ibb.co/MDQV2J8n/dress.png" alt="Dress">
+    <img class="cc-img" id="shoesVis" src="https://i.ibb.co/LXjf1pr2/shoes.png" alt="Shoes">
+
+    <!-- Transparent interaction surface -->
+    <div class="hit-surface" id="surface"></div>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+
+<script>
+const LAYERS = [
+  {
+    id: 'hair',
+    label: 'Chappell hair by Aurum',
+    imgUrl: 'https://i.ibb.co/C5myWkX2/hair.png',
+    link: 'https://www.thesimsresource.com/downloads/1757711',
+    visEl: 'hairVis'
+  },
+  {
+    id: 'necklace',
+    label: 'Necklace by Pitted0live',
+    imgUrl: 'https://i.ibb.co/217Q65p3/necklace.png',
+    link: 'https://www.thesimsresource.com/downloads/1734504',
+    visEl: 'necklaceVis'
+  },
+  {
+    id: 'dress',
+    label: 'Short patterned dress and cardigan by MysteriousOo',
+    imgUrl: 'https://i.ibb.co/MDQV2J8n/dress.png',
+    link: 'https://www.thesimsresource.com/downloads/1756965',
+    visEl: 'dressVis'
+  },
+  {
+    id: 'shoes',
+    label: 'Leigh Summer Shoes by Glitterberryfly',
+    imgUrl: 'https://i.ibb.co/LXjf1pr2/shoes.png',
+    link: 'https://www.thesimsresource.com/downloads/1754852',
+    visEl: 'shoesVis'
+  }
+];
+
+const viewer   = document.getElementById('viewer');
+const baseImg  = document.getElementById('base');
+const surface  = document.getElementById('surface');
+const tooltip  = document.getElementById('tooltip');
+const layerCanvases = new Map();
+
+function loadImage(src){
+  return new Promise((resolve, reject)=>{
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = ()=> resolve(im);
+    im.onerror = reject;
+    im.src = src;
+  });
+}
+
+async function prepareLayers(){
+  const base = await loadImage(baseImg.src);
+  baseImg.dataset.nw = base.width;
+  baseImg.dataset.nh = base.height;
+
+  for (const layer of LAYERS){
+    const img = await loadImage(layer.imgUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width  = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img,0,0);
+    layerCanvases.set(layer.id, {canvas, ctx, image: img, naturalW: img.width, naturalH: img.height});
+  }
+}
+
+function toImageCoords(clientX, clientY){
+  const rect = viewer.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const dispW = rect.width, dispH = rect.height;
+  const natW = +baseImg.dataset.nw, natH = +baseImg.dataset.nh;
+  const scaleX = natW / dispW, scaleY = natH / dispH;
+  return { ix: Math.floor(x * scaleX), iy: Math.floor(y * scaleY), inside: x>=0 && y>=0 && x<=dispW && y<=dispH };
+}
+
+function setHover(id, label, pageX, pageY){
+  for (const layer of LAYERS){
+    const el = document.getElementById(layer.visEl);
+    if (!el) continue;
+    el.classList.toggle('glow', layer.id === id);
+  }
+  if (id){
+    tooltip.textContent = label;
+    tooltip.style.opacity = '1';
+    tooltip.style.left = (pageX + 14) + 'px';
+    tooltip.style.top  = (pageY + 14) + 'px';
+  } else {
+    tooltip.style.opacity = '0';
+  }
+}
+
+function hitTest(clientX, clientY){
+  const { ix, iy, inside } = toImageCoords(clientX, clientY);
+  if (!inside) return null;
+  for (const layer of LAYERS){
+    const entry = layerCanvases.get(layer.id);
+    if (!entry) continue;
+    if (ix < 0 || iy < 0 || ix >= entry.naturalW || iy >= entry.naturalH) continue;
+    const pixel = entry.ctx.getImageData(ix, iy, 1, 1).data;
+    if (pixel[3] > 5) return layer;
+  }
+  return null;
+}
+
+surface.addEventListener('mousemove', (e)=>{
+  const hit = hitTest(e.clientX, e.clientY);
+  if (hit){
+    setHover(hit.id, hit.label, e.pageX, e.pageY);
+    surface.style.cursor = 'pointer';
+  } else {
+    setHover(null, '', e.pageX, e.pageY);
+    surface.style.cursor = 'default';
+  }
+});
+surface.addEventListener('mouseleave', ()=> setHover(null));
+surface.addEventListener('click', (e)=>{
+  const hit = hitTest(e.clientX, e.clientY);
+  if (hit && hit.link){ window.open(hit.link, '_blank'); }
+});
+
+(async function init(){ await prepareLayers(); })();
+</script>
+</body>
+</html>
